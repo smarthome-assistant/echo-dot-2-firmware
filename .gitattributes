@@ -1,0 +1,12 @@
+# Patch-Dateien muessen LF behalten. Mit CRLF schlaegt `git am` unter Linux
+# fehl ("patch does not apply"), ohne dass der Grund ersichtlich waere --
+# und dieses Repo richtet sich an Leute, die genau das tun wollen.
+*.patch     text eol=lf
+*.md        text eol=lf
+LICENSE     text eol=lf
+NOTICE.txt  text eol=lf
+
+# Bauten sind binaer und werden nie umgeschrieben.
+echod*      binary
+*.json      text eol=lf
+*.sig       text eol=lf
