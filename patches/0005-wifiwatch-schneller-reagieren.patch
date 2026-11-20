@@ -1,0 +1,61 @@
+diff --git a/echod/internal/feature/wifiwatch/broadcast.go b/echod/internal/feature/wifiwatch/broadcast.go
+index 04d0e7c9..f162494c 100644
+--- a/echod/internal/feature/wifiwatch/broadcast.go
++++ b/echod/internal/feature/wifiwatch/broadcast.go
+@@ -43,8 +43,19 @@ const (
+ 
+ 	// bcFirstWait is the least time between two reassociations, doubling to bcMostWait while they do
+ 	// not bring the broadcasts back.
++	//
++	// bcMostWait was six hours. A reassociation costs a few seconds of Wi-Fi, so being careful here is
++	// right — but six hours is not careful, it is giving up: on a router that rekeys every ten
++	// minutes, a couple of attempts that happen to land in a quiet stretch put the watcher to sleep
++	// for the rest of the day. Capped at thirty minutes, which is three rekeys: long enough not to
++	// loop, short enough to come back.
++	//
++	// bcFirstWait is left at five minutes. Unlike the multicast refresh, this one does cost Wi-Fi,
++	// and the measurement of 19 Nov 2026 showed the broadcast side was already being handled —
++	// "broadcasts are back after reassociating after=30s", every time. The multicast side was the
++	// one that was late.
+ 	bcFirstWait = 5 * time.Minute
+-	bcMostWait  = 6 * time.Hour
++	bcMostWait  = 30 * time.Minute
+ )
+ 
+ // broadcast watches for broadcasts that stop while the link is up, with what it asks the world for as
+diff --git a/echod/internal/feature/wifiwatch/multicast.go b/echod/internal/feature/wifiwatch/multicast.go
+index a0b9ed71..c413b322 100644
+--- a/echod/internal/feature/wifiwatch/multicast.go
++++ b/echod/internal/feature/wifiwatch/multicast.go
+@@ -19,12 +19,28 @@ import (
+ const (
+ 	// mcQuiet is how long multicast heard before may be silent. Home Assistant's own discovery and
+ 	// router adverts arrive every few minutes on most networks.
+-	mcQuiet = 10 * time.Minute
++	//
++	// Measured on a Dot behind a FRITZ!Box that rekeys every ten minutes (19 Nov 2026, 425 one-minute
++	// rounds over 8.1 h): the unit answered mDNS in only 24.2 % of the minutes, with 29 deaf spells,
++	// median 12 minutes. The broadcast watcher was doing its work — it reassociated after ~3.5 min
++	// each time — but mDNS rides on multicast, and this watcher only looked after ten minutes of
++	// silence. With a rekey every ten minutes it was always one step behind, and the unit spent most
++	// of its life unfindable for mDNS, AirPlay, Sendspin and ESPHome discovery.
++	//
++	// 90 s instead. The refresh costs no Wi-Fi at all (see the note above), so a false alarm on a
++	// genuinely quiet network costs a log line, while a late one costs the unit its discoverability.
++	// Where those two are weighed against each other, the cheap mistake is the right one to risk.
++	mcQuiet = 90 * time.Second
+ 
+ 	// mcFirstWait is how long after a refresh before another, doubling to mcMostWait while multicast
+ 	// stays quiet. A refresh that brought multicast back starts over from mcFirstWait.
+-	mcFirstWait = 10 * time.Minute
+-	mcMostWait  = 6 * time.Hour
++	//
++	// mcMostWait was six hours, which on a ten-minute rekey meant the watcher gave up for the rest of
++	// the day after a few refreshes that happened to land in a quiet stretch. Capped at twenty
++	// minutes: long enough that a quiet network is left alone, short enough that the next rekey is
++	// still answered.
++	mcFirstWait = 90 * time.Second
++	mcMostWait  = 20 * time.Minute
+ )
+ 
+ // multicast watches for multicast that stops while the link is up, with what it asks the world for

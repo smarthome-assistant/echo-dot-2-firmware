@@ -1,0 +1,123 @@
+diff --git a/echod/internal/config/config.go b/echod/internal/config/config.go
+index c9779b60..291b8af0 100644
+--- a/echod/internal/config/config.go
++++ b/echod/internal/config/config.go
+@@ -39,6 +39,7 @@ type Config struct {
+ 	TalkBack       TalkBack       `json:"talk_back,omitempty"`
+ 	Doorbell       Doorbell       `json:"doorbell,omitempty"`
+ 	Streaming      Streaming      `json:"streaming,omitempty"`
++	Discovery      Discovery      `json:"discovery,omitempty"`
+ 	Presence       Presence       `json:"presence,omitempty"`
+ 	Screen         Screen         `json:"screen"`
+ 	Home           Home           `json:"home"`
+@@ -114,6 +115,7 @@ func (w Writer) Security() SecurityWriter             { return SecurityWriter(w)
+ func (w Writer) Alarms() AlarmsWriter                 { return AlarmsWriter(w) }
+ func (w Writer) Timers() TimersWriter                 { return TimersWriter(w) }
+ func (w Writer) Sendspin() SendspinWriter             { return SendspinWriter(w) }
++func (w Writer) Discovery() DiscoveryWriter           { return DiscoveryWriter(w) }
+ func (w Writer) Snapcast() SnapcastWriter             { return SnapcastWriter(w) }
+ func (w Writer) MusicAssistant() MusicAssistantWriter { return MusicAssistantWriter(w) }
+ func (w Writer) Home() HomeWriter                     { return HomeWriter(w) }
+diff --git a/echod/internal/config/discovery.go b/echod/internal/config/discovery.go
+new file mode 100644
+index 00000000..db05cc68
+--- /dev/null
++++ b/echod/internal/config/discovery.go
+@@ -0,0 +1,34 @@
++package config
++
++// Discovery is how the device makes itself known on the network, so Home Assistant and other
++// browsers find it without being told an address (feature/api, mdns.go).
++//
++// What this turns off is only the unprompted announcement the device repeats every few minutes.
++// Three things happen whatever is set here, because each belongs to being on the network at all
++// rather than to advertising:
++//
++//   - answering an mDNS query, which is what any registered name does;
++//   - the one announcement that goes with registering, at start-up and after a reconnect;
++//   - the follow-up after an address change, without which Home Assistant keeps the old address.
++type Discovery struct {
++	// AnnounceOff stops the regular unprompted announcement. Off (so the announcement runs), because
++	// on this radio a device that only answers is not reliably found: after a group-key rekey the
++	// Wi-Fi firmware drops every group-addressed frame it receives, for minutes at a time
++	// (techo5-dot#45), and a query that arrives in such a window is never heard. Sending is not
++	// affected by that fault, so announcing is what gets the device found at all.
++	//
++	// Turning it off is for somebody who has the device in Home Assistant by its address and wants
++	// nothing of it on the network beyond that — one fewer thing talking, at the price of not being
++	// found again by itself.
++	AnnounceOff bool `json:"announce_off,omitempty"`
++}
++
++// Announces is whether the device sends unprompted announcements.
++func (d Discovery) Announces() bool { return !d.AnnounceOff }
++
++type DiscoveryWriter struct{ st *Store }
++
++// Announce turns the regular unprompted announcement on or off.
++func (w DiscoveryWriter) Announce(on bool) error {
++	return w.st.Update(func(c *Config) { c.Discovery.AnnounceOff = !on })
++}
+diff --git a/echod/internal/feature/setup/discovery.go b/echod/internal/feature/setup/discovery.go
+new file mode 100644
+index 00000000..e86a3a7b
+--- /dev/null
++++ b/echod/internal/feature/setup/discovery.go
+@@ -0,0 +1,57 @@
++package setup
++
++import (
++	"fmt"
++	"net/http"
++
++	"github.com/HuskerMinion/techo5/echod/internal/config"
++)
++
++// discoverySection is whether the device says "here I am" on the network by itself, so Home
++// Assistant finds it without being told an address (feature/api, mdns.go).
++//
++// The device answers a query whatever is set here; what this turns off is only the unprompted
++// announcement. The note says why that matters on this radio, because switching it off without
++// knowing is the kind of thing that costs an evening later.
++func discoverySection(w http.ResponseWriter, token string) {
++	c := config.Get().Discovery
++	checked := ""
++	if c.Announces() {
++		checked = " checked"
++	}
++	sectionOpen(w, "discovery", "Being found on the network", discoverySummary(c)...)
++	fmt.Fprint(w, `<form method="post" action="/setup/save">`)
++	hidden(w, token, "discovery")
++	fmt.Fprintf(w, `
++	 <p class="note" style="margin-top:0">Home Assistant finds devices by listening for them. This device
++	  answers whenever it is asked — but only if it hears the question.</p>
++	 <p><label><input type="checkbox" name="announce" value="yes" style="width:auto"%s> Say "here I am"
++	  every few minutes</label></p>
++	 <p class="note">On, as it comes. This radio stops taking in anything sent to everyone for minutes at a
++	  time after the router changes its group key, and a search that arrives in such a window is never heard.
++	  Sending is not affected, so announcing is what gets this device found at all. It is a few hundred bytes
++	  every three minutes.</p>
++	 <p class="note">Off, the device goes quiet and waits to be asked. Sensible if it is already in Home
++	  Assistant by its address and you want nothing else of it on the network — but then it may not be found
++	  again on its own. Three things still happen, because each belongs to being on the network rather than
++	  to advertising: it answers when asked, it announces itself once when it starts or reconnects, and it
++	  says so when its address changes, so Home Assistant can follow it.</p>
++	 <p><button type="submit">Save</button></p></form>`, checked)
++	sectionClose(w)
++}
++
++// discoverySummary is the line on the shut card.
++func discoverySummary(c config.Discovery) []string {
++	if c.Announces() {
++		return []string{"Says it is here every few minutes"}
++	}
++	return []string{"Quiet: answers when asked"}
++}
++
++// saveDiscovery takes the form.
++func saveDiscovery(r *http.Request) string {
++	if err := config.Set().Discovery().Announce(r.PostFormValue("announce") == "yes"); err != nil {
++		return err.Error()
++	}
++	return ""
++}

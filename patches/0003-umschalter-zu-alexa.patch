@@ -1,0 +1,129 @@
+diff --git a/echod/internal/feature/setup/toalexa_dot.go b/echod/internal/feature/setup/toalexa_dot.go
+new file mode 100644
+index 00000000..e140d939
+--- /dev/null
++++ b/echod/internal/feature/setup/toalexa_dot.go
+@@ -0,0 +1,104 @@
++//go:build dot
++
++package setup
++
++import (
++	"fmt"
++	"log/slog"
++	"net/http"
++	"os"
++	"os/exec"
++	"time"
++)
++
++// toAlexaSection is the switch back to Fire OS, which is still on the device in the system
++// partitions with its boot images beside it (ablauf-protokoll.md, S12).
++//
++// How it works: the bootloader reads a message at the start of the misc partition. "boot-recovery"
++// boots the recovery partition, where this Linux lives; empty boots the Android slots, which is
++// Fire OS with Alexa. Linux writes the message back on every boot (tools/linux/init), so a power
++// cut lands here and not unexpectedly at Amazon. Clearing it and rebooting is the whole switch.
++//
++// The way back is not software: in Fire OS nothing of ours runs, so there is no button to press
++// there. It is the volume-up key held while the power is connected, which the unlock (amonet)
++// mapped to the recovery partition. That is why the card says so twice and why it will not switch
++// until the box confirming it has been tried is ticked.
++const (
++	miscPartition = "/dev/mmcblk0p8"
++	// miscMessageLen is the bootloader message at the start of misc: one 32-byte block. The A/B
++	// metadata and this image's breadcrumbs live further in and must not be touched.
++	miscMessageLen = 32
++)
++
++func toAlexaSection(w http.ResponseWriter, token string) {
++	sectionOpen(w, "toalexa", "Switch to Alexa", "Fire OS is still on this device")
++	fmt.Fprint(w, `<form method="post" action="/setup/save">`)
++	hidden(w, token, "toalexa")
++	fmt.Fprint(w, `
++	 <p class="note" style="margin-top:0">Amazon's own software was never removed: it sits in the system
++	  partitions, untouched. This restarts the device into it. Alexa, the skills, Amazon Music and the
++	  shopping list all work as they did before the conversion.</p>
++	 <p class="note"><b>It is one or the other, not both.</b> In Fire OS this is Amazon's device again,
++	  with your account and the microphone in their cloud, and Home Assistant cannot reach it.</p>
++	 <p class="warn"><b>Coming back is a key, not a button.</b> Nothing of ours runs in Fire OS, so there
++	  is nothing there to click. To return: unplug the device, hold the <b>volume-up</b> key, plug it back
++	  in, and let go when the ring turns white. That starts this firmware again, and it stays until you
++	  switch away once more.</p>
++	 <p class="warn"><b>Try that key first, while this firmware is still running.</b> If it does not work
++	  on your device, a failed attempt costs nothing now — but it would cost the device later.</p>
++	 <p><label><input type="checkbox" name="tried" value="yes" style="width:auto"> I have held volume-up
++	  while plugging in, and this firmware started</label></p>
++	 <p><label><input type="checkbox" name="understood" value="yes" style="width:auto"> I understand that
++	  Fire OS may install an Amazon update, which can lock the device again</label></p>
++	 <p><button type="submit">Restart into Alexa</button></p></form>`)
++	sectionClose(w)
++}
++
++// saveToAlexa clears the bootloader message and reboots, once both boxes are ticked.
++func saveToAlexa(r *http.Request) string {
++	if r.PostFormValue("tried") != "yes" {
++		return "try the volume-up key first, while coming back is still free"
++	}
++	if r.PostFormValue("understood") != "yes" {
++		return "the box about Amazon's updates is not ticked"
++	}
++	if err := clearBootMessage(); err != nil {
++		slog.Error("to alexa: the bootloader message was not cleared; nothing was changed", "err", err)
++		return "the bootloader message could not be cleared: " + err.Error()
++	}
++	slog.Warn("to alexa: bootloader message cleared, restarting into Fire OS; come back with volume-up held while power is connected")
++	go func() {
++		// A moment, so this page's answer reaches the browser before the device goes.
++		time.Sleep(2 * time.Second)
++		_ = exec.Command("/bin/busybox.static", "reboot", "-f").Run()
++	}()
++	return ""
++}
++
++// clearBootMessage writes 32 zero bytes over the bootloader message and reads them back. Only the
++// message: everything after it in misc belongs to the bootloader and to this image.
++func clearBootMessage() error {
++	f, err := os.OpenFile(miscPartition, os.O_RDWR, 0)
++	if err != nil {
++		return err
++	}
++	defer f.Close()
++	if _, err := f.WriteAt(make([]byte, miscMessageLen), 0); err != nil {
++		return err
++	}
++	if err := f.Sync(); err != nil {
++		return err
++	}
++	// Read back: a write that did not take would leave the device booting this firmware again, which
++	// is harmless — but then the page must not claim it switched.
++	back := make([]byte, miscMessageLen)
++	if _, err := f.ReadAt(back, 0); err != nil {
++		return err
++	}
++	for _, b := range back {
++		if b != 0 {
++			return fmt.Errorf("the message is still there after clearing it")
++		}
++	}
++	return nil
++}
+diff --git a/echod/internal/feature/setup/toalexa_other.go b/echod/internal/feature/setup/toalexa_other.go
+new file mode 100644
+index 00000000..655f9a7b
+--- /dev/null
++++ b/echod/internal/feature/setup/toalexa_other.go
+@@ -0,0 +1,13 @@
++//go:build !dot
++
++package setup
++
++import "net/http"
++
++// The switch to Fire OS is the Echo Dot's: it is the board whose Fire OS stayed in the system
++// partitions when this firmware went into recovery (toalexa_dot.go). The Show's layout is another,
++// so the card is not offered there.
++
++func toAlexaSection(http.ResponseWriter, string) {}
++
++func saveToAlexa(*http.Request) string { return "this device has no switch to Fire OS" }

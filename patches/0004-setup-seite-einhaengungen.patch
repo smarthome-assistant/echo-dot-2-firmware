@@ -1,0 +1,31 @@
+diff --git a/echod/internal/feature/setup/page.go b/echod/internal/feature/setup/page.go
+index 25521f75..4ff45c4f 100644
+--- a/echod/internal/feature/setup/page.go
++++ b/echod/internal/feature/setup/page.go
+@@ -336,6 +336,10 @@ func (f *Feature) save(w http.ResponseWriter, r *http.Request) {
+ 		problem = saveMusic(r)
+ 	case "streaming":
+ 		problem = saveStreaming(r)
++	case "discovery":
++		problem = saveDiscovery(r)
++	case "toalexa":
++		problem = saveToAlexa(r)
+ 	case "bluetooth":
+ 		problem = saveBluetooth(r)
+ 	case "speaker":
+@@ -686,6 +690,7 @@ func (f *Feature) drawTab(ctx context.Context, w http.ResponseWriter, token, tab
+ 		}
+ 		haAccessSection(w, token)
+ 		homeAssistantSection(w, token)
++		discoverySection(w, token)
+ 		fmt.Fprint(w, `<h3>Away from home</h3>`)
+ 		tailscaleSection(w, token)
+ 		netbirdSection(w, token)
+@@ -713,6 +718,7 @@ func (f *Feature) drawTab(ctx context.Context, w http.ResponseWriter, token, tab
+ 		settingsFileSection(w, token)
+ 		shareSection(w, token)
+ 		devicesSection(w, token)
++		toAlexaSection(w, token)
+ 		if firstrun.CanReset() {
+ 			resetSection(w, token)
+ 		}

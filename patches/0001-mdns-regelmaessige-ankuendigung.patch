@@ -1,0 +1,106 @@
+diff --git a/echod/internal/feature/api/mdns.go b/echod/internal/feature/api/mdns.go
+index 653bdaef..6c4319a5 100644
+--- a/echod/internal/feature/api/mdns.go
++++ b/echod/internal/feature/api/mdns.go
+@@ -9,6 +9,7 @@ import (
+ 
+ 	"github.com/ygelfand/go-esphome-device/mdns"
+ 
++	"github.com/HuskerMinion/techo5/echod/internal/config"
+ 	"github.com/HuskerMinion/techo5/echod/internal/hardware/metrics"
+ 	"github.com/HuskerMinion/techo5/echod/internal/layout"
+ 	"github.com/HuskerMinion/techo5/echod/internal/lib/wifi"
+@@ -33,6 +34,9 @@ func (a *API) advertise(ctx context.Context, port int) {
+ 	var movedAt time.Time // the last IPv4 move, which the announcements after it follow up
+ 	// held is the Wi-Fi's IPv4 addresses last advertised (nextHeld).
+ 	var held []net.IP
++	// repeat is whether the next registration is the steady re-announcement of what was already
++	// advertised (announceEvery), which is not worth a line in the log.
++	repeat := false
+ 	for attempt := 1; ; attempt++ {
+ 		ips := metrics.Addresses()
+ 		if len(ips) == 0 {
+@@ -93,14 +97,25 @@ func (a *API) advertise(ctx context.Context, port int) {
+ 			continue
+ 		}
+ 
+-		slog.Info("advertising over mdns", "name", a.name, "port", port, "addrs", metrics.AddressKey(ips), "key", keyName(keyed))
++		// Only a registration that says something new is worth a line: the first one, and any that
++		// follows a change. The steady re-announcement (announceEvery) would otherwise write a line
++		// every three minutes — 480 a day, burying everything else in the log.
++		if !repeat {
++			slog.Info("advertising over mdns", "name", a.name, "port", port, "addrs", metrics.AddressKey(ips), "key", keyName(keyed))
++		} else {
++			slog.Debug("announcing over mdns again", "name", a.name, "addrs", metrics.AddressKey(ips))
++		}
++		repeat = false
+ 
+ 		// The registration stands until the addresses it was made with are no longer the ones the
+ 		// device has (a lease that changed, or a network that arrived late), or the key changed kind.
+-		// For a while after a move it is also made again every so often (followMove).
++		// For a while after a move it is made again every followEvery; otherwise every announceEvery,
++		// so that a Home Assistant which was not listening at the time still finds the device.
+ 		advertisedAt, again := time.Now(), false
+ 		for metrics.AddressKey(metrics.Addresses()) == metrics.AddressKey(ips) && a.keyed.Load() == keyed {
+-			if !movedAt.IsZero() && time.Since(movedAt) < followMove && time.Since(advertisedAt) >= followEvery {
++			// The setting is read each time round, not once: switching it on the setup page takes
++			// effect at the next look rather than at the next restart.
++			if every := announceAgainAfter(movedAt); every > 0 && time.Since(advertisedAt) >= every {
+ 				again = true
+ 				break
+ 			}
+@@ -119,6 +134,7 @@ func (a *API) advertise(ctx context.Context, port int) {
+ 			if !pause(ctx, goodbyeGap) {
+ 				return
+ 			}
++			repeat = true
+ 			continue
+ 		}
+ 		slog.Info("addresses or key changed, re-advertising over mdns", "was", metrics.AddressKey(ips), "key was", keyName(keyed))
+@@ -235,6 +251,46 @@ const (
+ 	goodbyeGap  = 2 * time.Second
+ )
+ 
++// announceEvery is how often the device announces itself when nothing has changed.
++//
++// Without this the record went out once, at the registration, and then only when an address or the key
++// changed. Answering a query still worked — but only a query the device hears, and on this radio it
++// does not always hear one: after a group-key rekey the Wi-Fi firmware drops every group-addressed
++// frame it receives, for minutes at a time (techo5-dot#45; measured here on 19.11.2026, three minutes
++// answered and then ten minutes silent, with the firmware's md5 the same as the one in that report).
++// A query that arrives in such a window is never heard and never answered, so a device that had been
++// up for hours was found only by a Home Assistant that happened to ask while the device was listening.
++//
++// Sending is not affected by that fault — only receiving is. An unprompted announcement therefore
++// reaches Home Assistant even while the device is deaf, which is the whole point of sending one.
++//
++// Three minutes. The records are served with zeroconf's default TTL of 3200 s, so this is not about
++// keeping them from expiring: what a browser already holds stands for the best part of an hour. It is
++// about reaching a Home Assistant that was not listening before — one that has just started, or just
++// had its zeroconf restarted, and whose own queries fell into a deaf window. Each announcement is a
++// goodbye and a fresh record a moment apart (goodbyeGap), the shape the code already used after a
++// move: a browser takes it as the device gone and back, which is what makes Home Assistant offer it
++// again. A device already added talks over its own connection and does not care. At this pace it is
++// a few hundred bytes every three minutes.
++const announceEvery = 3 * time.Minute
++
++// announceAgainAfter is how long the current registration stands before it is made again: the shorter
++// follow-up pace for a while after a move, otherwise the steady announceEvery. Zero means never —
++// the registration stands and the device still answers queries, it just says nothing unprompted.
++//
++// The follow-up after a move is kept even with announcements switched off: it is not the steady
++// announcement but the device telling Home Assistant where it went, without which a device that
++// changed address is lost to it until something restarts.
++func announceAgainAfter(movedAt time.Time) time.Duration {
++	if !movedAt.IsZero() && time.Since(movedAt) < followMove {
++		return followEvery
++	}
++	if !config.Get().Discovery.Announces() {
++		return 0
++	}
++	return announceEvery
++}
++
+ // movedGap is how long a device that changed address stays unannounced: longer than Home Assistant's
+ // keepalive (aioesphomeapi: 20 s pings, given up after 4.5 of them) takes to drop the old connection.
+ const movedGap = 2 * time.Minute
