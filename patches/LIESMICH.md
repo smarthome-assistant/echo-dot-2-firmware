@@ -211,18 +211,29 @@ Und weil mDNS über Multicast läuft, war das Gerät damit die meiste Zeit unauf
 
 **Gemessene Wirkung** (Messreihen in `privat\messungen\`, Auswertung mit `spikes\mdns_auswerten.py`):
 
-| | vorher (425 Runden, 8,1 h) | **nachher (513 Runden, 8,9 h)** |
+| | vorher (425 Runden, 8,1 h) | **nachher (608 Runden, 10,6 h)** |
 |---|---|---|
-| erreichbar | 24,2 % | **71,2 %** |
-| längste Phase | 27 min | **4 min** |
+| erreichbar | 24,2 % | **68,8 %** |
+| längste Phase | 27 min | **5 min** |
 | Median einer Phase | 12 min | **1 min** |
-| Rundrufe taub/erreichbar | 0,38 | **0,89** |
-| **taube Minuten ganz ohne Empfang** | **174 von 322** | **0 von 148** |
+| Rundrufe taub/erreichbar | 0,38 | **0,88** |
+| **taube Minuten ganz ohne Empfang** | **174 von 322** | **0 von 189** |
 
-Beide Messreihen laufen über rund neun Stunden und sind damit unmittelbar vergleichbar.
+Die Vorher-Reihe läuft über 516 Runden (8,6 h), die Nachher-Reihe über 608 Runden (10,6 h).
+
+> **Berichtigt am 20.11.2026.** Hier standen zuvor 71,2 %, „längste Phase 4 Minuten" und
+> „0 von 148" — Zahlen aus einer **Zwischenauswertung nach 513 Runden**, während die Messung noch
+> lief. Sie wurde am 20.11. um 06:31 beendet und vollständig ausgewertet; oben stehen jetzt die
+> endgültigen Werte. Die Aussage ändert sich dadurch nicht, die Zahlen schon.
+>
+> **Das ist derselbe Fehler wie am 19.11.**, als „70 %" aus einer Zwischenauswertung nach 124
+> Runden in die Dokumente geriet. Daraus die Regel, die diesmal nicht befolgt wurde: **Eine
+> laufende Messung liefert keine Zahl für ein Dokument.** Wer eine Zwischenzahl aufschreibt, muss
+> sie als solche kennzeichnen und beim Abschluss ersetzen — sonst wandert sie weiter, hier bis in
+> ein öffentliches Repository.
 
 Die letzte Zeile ist die aussagekräftigste: Vorher brach der Empfang in den tauben Phasen ein
-(Verhältnis 0,38), jetzt läuft er unverändert weiter (1,04). **Es gibt keine Funk-Taubheit mehr**;
+(Verhältnis 0,38), jetzt läuft er unverändert weiter (0,88). **Es gibt keine Funk-Taubheit mehr**;
 die verbleibenden Lücken sind die 90 Sekunden, die der Wächter zum Reagieren braucht.
 
 **Geprüft vor dem Einspielen:** `go vet` sauber · **die Tests des Wächters auf dem Gerät selbst

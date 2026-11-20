@@ -36,9 +36,9 @@ bcMostWait               6 h    →  30 min
 
 | | vorher | nachher |
 |---|---|---|
-| im Netz auffindbar | 24,2 % der Zeit | **71,2 %** |
-| längste blinde Phase | 27 Minuten | **4 Minuten** |
-| Minuten ganz ohne Empfang | 174 von 322 | **0 von 148** |
+| im Netz auffindbar | 24,2 % der Zeit | **68,8 %** |
+| längste blinde Phase | 27 Minuten | **5 Minuten** |
+| Minuten ganz ohne Empfang | 174 von 322 | **0 von 189** |
 
 Die letzte Zeile ist die aussagekräftigste: Der Empfang bricht nicht mehr ein. Was bleibt, ist die Reaktionszeit des Wächters — eine Wartezeit, kein Fehler.
 

@@ -1,0 +1,35 @@
+diff --git a/echod/internal/update/releases_dot.go b/echod/internal/update/releases_dot.go
+index e93baa20..3f4cb6a7 100644
+--- a/echod/internal/update/releases_dot.go
++++ b/echod/internal/update/releases_dot.go
+@@ -4,4 +4,12 @@ package update
+ 
+ // releases is where the Echo Dot's releases are published: a project of its own, so a Dot release never
+ // becomes the Show's "latest", and the Show's never the Dot's.
+-const releases = "https://github.com/HuskerMinion/techo5-dot/releases"
++//
++// Pointed at our own fork (20 Nov 2026). The upstream channel is
++// https://github.com/HuskerMinion/techo5-dot/releases, and a build that follows it is a one-line
++// change away — but the two cannot be mixed: releaseKey in trust.go is ours, so a unit running this
++// build refuses upstream manifests and vice versa. Switching either way means flashing by hand.
++//
++// What is published here are our own builds of this source with the patches that live beside it:
++// nothing from Amazon, and the upstream MIT notice travels with them.
++const releases = "https://github.com/smarthome-assistant/echo-dot-2-firmware/releases"
+diff --git a/echod/internal/update/trust.go b/echod/internal/update/trust.go
+index 73bf9f07..fef86cb6 100644
+--- a/echod/internal/update/trust.go
++++ b/echod/internal/update/trust.go
+@@ -15,7 +15,11 @@ import (
+ // manifest.json into manifest.json.sig). An update installs as root, so a manifest is believed only
+ // when this key signed it: HTTPS alone would let anything that can present a certificate the device
+ // accepts, or a device told to skip certificate checks, hand it a root filesystem.
+-var releaseKey = "KVUuQUbhyKwPBbIneqFEvXYSI+3Hkfu/heCTy5YNVMk="
++// Ours (20 Nov 2026), replacing upstream's KVUuQUbhyKwPBbIneqFEvXYSI+3Hkfu/heCTy5YNVMk=, because
++// this build follows our own channel (releases_dot.go). The private half is held offline and is in
++// no repository, no backup that leaves the machine, and no image: whoever holds it can run code as
++// root on every unit following this channel, which is the whole reason the check exists.
++var releaseKey = "eJX5OR/aTmvmU15gs0fEn0nbluq7bvAd4REPeJcY1EU="
+ 
+ // client is the updater's own HTTP client. The diagnostics switch that skips certificate checks
+ // changes http.DefaultTransport for media and models; it never reaches here.
