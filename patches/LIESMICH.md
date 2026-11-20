@@ -247,3 +247,44 @@ am Gerät identisch · keine Fehlerzeile nach dem Start.
 **Für andere Netze:** Der Patch macht **keine Annahme über das Netz** — er verkürzt nur
 Wartezeiten eines vorhandenen Mechanismus. In einem ruhigen Netz ohne viel Multicast führt das zu
 etwas häufigeren Filter-Erneuerungen, die nichts kosten; die Tests decken diesen Fall ab.
+
+---
+
+## 0006 — eigener Update-Kanal
+
+**Auftrag Markus, 20.11.2026:** „Firmware update sollte zu uns umgeleitet werden und wir verteilen
+updates mit unseren Patches."
+
+**Zwei Zeilen**, und beide gehören zusammen:
+
+| Datei | was |
+|---|---|
+| `internal/update/releases_dot.go` | die URL, von der das Manifest geholt wird |
+| `internal/update/trust.go` | der öffentliche Schlüssel, gegen den dessen Signatur geprüft wird |
+
+**Warum beide.** Die Firmware holt `manifest.json` und daneben `manifest.json.sig` — eine
+ed25519-Signatur über genau die Bytes des Manifests. Ohne gültige Signatur geschieht nichts. Der
+Quelltext begründet das selbst: „An update installs as root, so a manifest is believed only when
+this key signed it." Nur die URL zu ändern, ergäbe ein Gerät, das zwar bei uns nachfragt, aber
+jede Antwort zurückweist.
+
+**Die Kanäle lassen sich nicht mischen.** Ein Gerät mit diesem Patch nimmt keine Manifeste des
+Ursprungsprojekts mehr an und umgekehrt. Der Wechsel ist in beide Richtungen möglich, braucht
+aber jedes Mal eine Installation von Hand.
+
+**Geprüft:** `go vet` sauber · im fertigen Bau nachgesehen, dass die neue Adresse zweimal und der
+neue Schlüssel einmal vorkommen und die alten **gar nicht** · Manifest signiert und die Signatur
+mit dem öffentlichen Teil geprüft, samt Gegenprobe (ein um ein Bit verändertes Manifest muss
+durchfallen — es fällt durch).
+
+**Der private Schlüssel liegt in `privat\update-schluessel\release.key`** und nirgends sonst. Wer
+ihn hat, kann auf jedem Gerät dieses Kanals Code als root ausführen; das ist der Grund, aus dem
+die Prüfung überhaupt existiert.
+
+**Rückweg:** Der vorherige Stand liegt am Gerät unter `/data/rueckweg/echod.vor-kanal1`. Ein Bau
+ohne diesen Patch folgt wieder dem Ursprungsprojekt.
+
+**Nicht eingebaut: automatische Installation.** Sie ist vorhanden (nachts 2–5 Uhr, nur bei Ruhe,
+mit Rückfall über die A/B-Plätze), steht aber auf „aus" und bleibt es — so entschieden am
+20.11.2026. Bei einem eigenen Kanal heißt das: Ein Fehler in unserem Bau erreicht kein Gerät
+ungefragt.

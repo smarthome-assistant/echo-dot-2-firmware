@@ -91,6 +91,18 @@ Die Reihenfolge und die Besonderheiten stehen in [`patches/LIESMICH.md`](patches
 
 > **Versionsmarken mit Unterstrich**, nie mit `+`. Home Assistant kann ein `+` nicht einordnen und bietet dann endlos ein Update an, das nie fertig wird. Richtig: `v1.0.72_mdns2`.
 
+> **Die Versionsmarke setzt man so** — und der Paketpfad muss genau stimmen:
+>
+> ```sh
+> -ldflags "-s -w -X 'github.com/HuskerMinion/techo5/echod/internal/layout.Version=v1.0.72_eigen'"
+> ```
+>
+> **Go meldet einen falschen Pfad nicht.** Es verwirft das `-X` stillschweigend, und der Bau trägt dann `v0.0.0-dev` — ein Bau, der sich so nennt, hält jedes Manifest für neuer als sich selbst. Nach dem Bauen deshalb nachsehen, ob die Marke wirklich drin ist:
+>
+> ```sh
+> grep -c 'v1.0.72_eigen' echod    # muss mindestens 1 sein
+> ```
+
 ---
 
 ## Wichtige Hinweise
