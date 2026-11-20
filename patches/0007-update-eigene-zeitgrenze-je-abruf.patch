@@ -1,0 +1,54 @@
+diff --git a/echod/internal/update/manifest.go b/echod/internal/update/manifest.go
+index 2ad4f239..0665cf03 100644
+--- a/echod/internal/update/manifest.go
++++ b/echod/internal/update/manifest.go
+@@ -75,6 +75,15 @@ var arch = runtime.GOARCH + archSuffix
+ 
+ // manifestTimeout bounds the fetch. Home Assistant asks for this on connect and after every selection
+ // change, so it has to fail quickly rather than hold up a configuration reply.
++//
++// It is per request, not for both together. Until 20 Nov 2026 one deadline covered the manifest and
++// its signature, so a slow manifest left the signature whatever was left over — and the failure read
++// "the manifest has no signature", which points at the release rather than at the clock running out.
++//
++// Measured on a Dot over Wi-Fi, eight rounds of both fetches: 2, 9, 2, 5, 9, 16, 6, 5 seconds in
++// total. Every single request succeeded; three rounds simply did not fit in ten seconds between
++// them. Two independent deadlines leave the common case exactly as it was and only lengthen the
++// worst case, which is the one already failing.
+ const manifestTimeout = 10 * time.Second
+ 
+ // maxManifest is a sanity bound on the response. A manifest is a few hundred bytes; anything else is a
+@@ -94,15 +103,12 @@ func Fetch(ctx context.Context, c Channel) (Manifest, error) {
+ 		return m, ErrClock
+ 	}
+ 
+-	ctx, cancel := context.WithTimeout(ctx, manifestTimeout)
+-	defer cancel()
+-
+ 	url := channelURL(c)
+-	body, err := get(ctx, url, maxManifest)
++	body, err := getBounded(ctx, url, maxManifest)
+ 	if err != nil {
+ 		return m, err
+ 	}
+-	sig, err := get(ctx, url+".sig", 1<<10)
++	sig, err := getBounded(ctx, url+".sig", 1<<10)
+ 	if err != nil {
+ 		return m, fmt.Errorf("update: the manifest has no signature: %w", err)
+ 	}
+@@ -118,6 +124,15 @@ func Fetch(ctx context.Context, c Channel) (Manifest, error) {
+ // channelURL is Channel.URL, a variable so a test can serve the channel itself.
+ var channelURL = Channel.URL
+ 
++// getBounded is get with manifestTimeout of its own, so that one slow fetch does not eat the time
++// the next one needs. A caller that already has a deadline keeps it: the shorter of the two wins,
++// which is what context.WithTimeout does.
++func getBounded(ctx context.Context, url string, max int64) ([]byte, error) {
++	ctx, cancel := context.WithTimeout(ctx, manifestTimeout)
++	defer cancel()
++	return get(ctx, url, max)
++}
++
+ // get fetches a small file through the updater's own client, refusing anything over max bytes.
+ func get(ctx context.Context, url string, max int64) ([]byte, error) {
+ 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)

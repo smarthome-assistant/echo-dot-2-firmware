@@ -17,6 +17,24 @@ Das Ziel ist ein **Sprach-Satellit für Home Assistant** auf vorhandener Hardwar
 | `0003` | Umschalter zurück zu Fire OS, über die Einrichtungsseite | am Gerät erprobt |
 | `0004` | Die Einhängungen dafür in der Einrichtungsseite | — |
 | `0005` | **Der WLAN-Wächter reagiert schneller** | zwei Messreihen à ~9 h |
+| `0006` | Umleitung auf diesen Kanal (Adresse und Signaturschlüssel) | — |
+| `0007` | **Jeder Abruf der Update-Prüfung bekommt seine eigene Zeitgrenze** | acht Durchgänge am Gerät |
+
+### Und `0007`, gefunden beim ersten Betrieb dieses Kanals
+
+Die Update-Prüfung meldete wiederholt:
+
+```
+checking for an update failed  err="update: the manifest has no signature: ..."
+```
+
+**Die Signatur war da** — vom Gerät aus fünfmal von fünf in unter einer Sekunde abrufbar, und gültig. `Fetch()` setzte **eine** Frist von zehn Sekunden und holte darin **zwei** Dateien; die Signatur bekam, was übrig blieb.
+
+Acht Durchgänge beider Abrufe am Gerät, Dauer zusammen: **2, 9, 2, 5, 9, 16, 6, 5 Sekunden.** Jeder einzelne Abruf gelang — drei Durchgänge passten nur nicht zu zweit in zehn Sekunden.
+
+Jetzt hat jeder Abruf seine eigene Frist. Der Normalfall bleibt unverändert; nur der schlechteste Fall wird länger, und das ist der, der vorher scheiterte.
+
+**Das trifft nicht nur langsame Netze.** Bei einem geteilten Budget verliert **immer** die Signatur, weil sie als zweites geholt wird — und die Fehlermeldung zeigt dann auf das Release statt auf die Uhr. Wer das liest, sucht am falschen Ende.
 
 ### Der wichtigste: `0005`
 

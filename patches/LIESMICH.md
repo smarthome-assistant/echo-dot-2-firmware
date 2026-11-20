@@ -288,3 +288,48 @@ ohne diesen Patch folgt wieder dem Ursprungsprojekt.
 mit Rückfall über die A/B-Plätze), steht aber auf „aus" und bleibt es — so entschieden am
 20.11.2026. Bei einem eigenen Kanal heißt das: Ein Fehler in unserem Bau erreicht kein Gerät
 ungefragt.
+
+---
+
+## 0007 — jeder Abruf bekommt seine eigene Zeitgrenze
+
+**Gefunden beim ersten Betrieb des eigenen Kanals (20.11.2026).** Die Update-Prüfung schlug
+wiederholt fehl, zuletzt mit einer Meldung, die in die Irre führt:
+
+    checking for an update failed  err="update: the manifest has no signature: ..."
+
+Die Signatur war da. Sie lag auf dem Server, war vom Gerät aus **fünfmal von fünf** in unter einer
+Sekunde abrufbar, und sie war gültig.
+
+**Die Ursache:** `Fetch()` setzte **eine** Frist von zehn Sekunden und holte darin **zwei** Dateien
+— erst das Manifest, dann die Signatur. Die Signatur bekam, was übrig blieb.
+
+    ctx, cancel := context.WithTimeout(ctx, manifestTimeout)   // 10 s für beides
+    body, _ := get(ctx, url, maxManifest)                      // nimmt sich, was es braucht
+    sig,  _ := get(ctx, url+".sig", 1<<10)                     // bekommt den Rest
+
+**Am Gerät gemessen**, acht Durchgänge beider Abrufe nacheinander, Dauer zusammen:
+
+| Durchgang | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+|---|---|---|---|---|---|---|---|---|
+| Sekunden | 2 | **9** | 2 | 5 | **9** | **16** | 6 | 5 |
+
+**Jeder einzelne Abruf gelang** — der Rückgabewert war durchweg 0. Drei von acht Durchgängen
+passten nur nicht in zehn Sekunden zu zweit. Das ist keine Störung, sondern eine zu knappe Frist.
+
+**Die Änderung:** `getBounded()` gibt jedem Abruf `manifestTimeout` für sich.
+
+- **Der Normalfall bleibt unverändert.** Wer in zwei Sekunden fertig ist, merkt nichts.
+- **Nur der schlechteste Fall wird länger** — und das ist genau der, der vorher scheiterte.
+- Eine vorhandene Frist des Aufrufers gilt weiter: `context.WithTimeout` nimmt die kürzere.
+
+**Warum das allgemein und nicht nur für unser Netz sinnvoll ist:** Bei einem geteilten Budget
+verliert **immer** die Signatur, weil sie als zweites geholt wird. Das trifft jede langsame
+Verbindung, und die Fehlermeldung zeigt dabei auf die falsche Stelle — sie klingt nach einem
+kaputten Release, nicht nach einer abgelaufenen Uhr. Jemand, der das sieht, sucht am falschen Ende.
+
+**Geprüft:** `go vet` sauber · `go test ./internal/update/` bestanden · im fertigen Programm
+nachgesehen, dass Versionsmarke, Adresse und Schlüssel stimmen.
+
+**Rückweg:** Patch nicht anwenden; der vorherige Stand liegt am Gerät unter
+`/data/rueckweg/echod.vor-kanal1`.
