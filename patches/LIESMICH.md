@@ -113,6 +113,14 @@ ohne Neustart.
 | **Anlass** | Markus, 19.11.2026: „Wie kann die wahl getroffen werden? Es muss sehr einfach sein" |
 | **Stand** | gebaut; **am Gerät noch nicht ausgelöst** — die Vorarbeiten stehen aus |
 
+> **Erneuert am 20.11.2026 (Paket 2):** Die Textberichtigung vom 20.11. („zehn Sekunden halten,
+> auf **grün** warten" statt „loslassen, wenn der Ring weiß wird") stand nur in der Arbeitskopie
+> und im gebauten Programm, **nicht in diesem Patch**. Aufgefallen beim Nachbau aus frischem Klon:
+> Das Ergebnis wich vom Programm am Gerät ab. Neu erzeugt aus dem Stand, aus dem `v1.0.72_kanal2`
+> gebaut ist; danach ist frischer Klon + 0001–0007 **bitgleich** mit dem Programm am Gerät und im
+> Release. **Das öffentliche Repo trägt noch die alte Fassung** (Blob `ee49d132`) — Berichtigung
+> dort auf Markus' Wort.
+
 Ein Knopf unter **System**, der das Startfeld in `misc` leert und neu startet; danach läuft Fire OS
 mit Alexa. Zurück geht es mit der **Lauter-Taste beim Einstecken** — in Fire OS läuft nichts von
 uns, also kann es dort keinen Knopf geben.
@@ -333,3 +341,101 @@ nachgesehen, dass Versionsmarke, Adresse und Schlüssel stimmen.
 
 **Rückweg:** Patch nicht anwenden; der vorherige Stand liegt am Gerät unter
 `/data/rueckweg/echod.vor-kanal1`.
+
+---
+
+# `dot-bau\` — Patches gegen die Bauwerkzeuge (techo5-dot, Tag `dot-v1.0.72`)
+
+Seit 20.11.2026 (Paket 2, `ablauf-protokoll.md` S28). Angewendet mit `git am` in der
+Reihenfolge der Nummern; `spikes\repro_bau.py` tut das selbst.
+
+| Patch | Was |
+|---|---|
+| `0001-mkrootfs-…` | **Gleiche Eingaben, gleiche Bytes:** `SOURCE_DATE_EPOCH` für alle Zeitstempel im Archiv und im gzip-Kopf, Overlay in Namensreihenfolge (`os.walk` folgt sonst dem Dateisystem), kein Dateiname im gzip-Kopf |
+| `0002-packages-…` | Paketlisten auf die Fassungen im eigenen Lager (Alpine bietet acht der genannten nicht mehr an) |
+| `0003-build-dot-rootfs-…` | `--extra SRC=DEST` für eigene Programme (das Overlay würde sie mit 0644 anlegen) |
+| `0004-rootfs-…` | `boot.sh` (Lichtsignal + `seedctl`) und `techo5-net` (Kanal nur für die erste Suche) — die Fassungen, die am Gerät laufen |
+
+**Geprüft, je mit Gegenprobe:** zwei Bauten bitgleich; **ohne 0001 nicht** bitgleich; ein
+verändertes Byte im Lager bricht den Bau ab; ohne Lager (`GOPROXY=off`) baut `echod` nicht.
+
+---
+
+## 0008 — Home Assistant: der Weg ohne Tippen zuerst, der Schlüssel auf Klick
+
+| | |
+|---|---|
+| **Berührt** | `internal/feature/setup/keyshow.go` (neu), `keyshow_test.go` (neu), `page.go`, `tabs.go` |
+| **Anlass** | Markus, 20.11.2026: „können wir den nutzern den verschlüsselungscode in der weboberfläche anzeigen und im tool dazu anleiten?" (`docs\offene-punkte-home-assistant.md`, Punkt 3) |
+| **Stand** | gebaut als `v1.0.72_kanal3`, Tests **am Gerät** bestanden; am Gerät noch nicht eingespielt |
+
+1. **Der Weg ohne Tippen steht vorn.** Die Karte **Network → Home Assistant** beginnt mit
+   „Home Assistant asks for an encryption key? You do not need to type one." Die Kurzzeile der
+   Karte sagt ohne Verbindung „Not connected — can be added without typing a key".
+2. **Der Schlüssel auf Klick** („Show the key to type instead"), mit Kopierknopf und QR-Code — so
+   wie der Erststart des Ursprungsprojekts ihn schon immer zeigt (`firstrun_page.go`), mit zwei
+   Auflagen mehr, weil die Einstellungsseite länger offen ist und der Schlüssel jede Sitzung
+   überdauert: **nur auf POST mit dem Token der Seite** (nie im Seitenaufbau, nicht im Verlauf,
+   `Cache-Control: no-store`) und **nur, solange kein Home Assistant verbunden ist**. Das Protokoll
+   vermerkt, *dass* er gezeigt wurde, nie *was*.
+3. Der Satz „never shows the Home Assistant key" im Abschnitt **This page** ist ehrlich ersetzt.
+4. **Nebenbei behoben, ein Fehler aus 0002/0003:** Die Formulare `discovery` und `toalexa`
+   fehlten in der Reiter-Zuordnung (`tabs.go`); nach dem Speichern sprang die Seite auf *Status*
+   statt zurück. Gefunden vom vorhandenen Test `TestEveryFormIsDrawnOnTheTabItComesBackTo`.
+
+**Abwägung, mit dem Berater (Fable 5.2) und nachgeprüft:** Der Schlüssel ist mehr als eine
+Sitzung — er gilt dauerhaft, ohne Tastendruck, und über Home Assistants Schnittstelle lässt sich
+damit SSH schalten, was die Seite selbst bewusst nicht kann (`page.go`, `switchedOnSection`).
+Gegen einen Mithörer im eigenen WLAN ist die Anzeige gleichwertig mit dem Weg ohne Tippen (auch
+dort geht der neue Schlüssel im Klartext übers Netz); dieser hält dafür 15 Minuten lang die Tür
+für jeden offen. Deshalb beide Wege, der ohne Tippen zuerst, und die Anzeige eng begrenzt.
+
+**Geprüft:** `go vet` (linux/arm) sauber · neue Tests am Gerät bestanden: Schlüssel nur auf POST
+mit Token und ohne Verbindung; abgewiesen ohne Einlass, per GET, mit falschem Token und bei
+verbundenem Home Assistant; **die Einstellungsseite enthält den Schlüssel in keinem Zustand** ·
+frischer Klon + 0001–0008 **bitgleich** mit dem Bau aus der Arbeitskopie (`0d5c035c…`).
+Zwei Tests des Pakets scheitern am Gerät aus Umgebungsgründen (lesen Quelltext von der Platte;
+zählen die zwölf Aufweckwort-Modelle des Geräts) — nicht durch diesen Patch.
+
+**Rückweg:** Patch nicht anwenden; am Gerät `/data/rueckweg/echod.vor-kanal3`.
+
+## 0009 — der WLAN-Wächter liest das Kernel-Protokoll, ohne die Mikrofone zu stören
+
+**Datei:** `0009-wifi-kernelzeilen-aus-kmsg.patch` · **gegen:** TECHO5 `2d021e42` + 0001–0008 ·
+**Bau:** `v1.0.72_kanal4`, sha256 `a02c4992…` · Befund und Messungen: `docs\ablauf-protokoll.md`, S33,
+Teil C.
+
+**Das Problem.** Vor jedem Eingriff zeichnet der Wächter einen Beleg auf (`wifi.Evidence`), und der
+rief `dmesg`. `dmesg` liest auf dem 3.18-Kernel des Dot den ganzen Ringpuffer (1 MB) mit gesperrten
+Interrupts. Der SPI-Leser der Mikrofone kommt so lange nicht dran, und der Puffer im FPGA läuft
+über: rund 16 ms Ton weg, bei **jedem** `dmesg` (am Gerät 10 von 10, Gegenprobe 0 von 10). Seit
+Patch 0005 greift der Wächter in tauben Phasen etwa alle zehn Minuten ein — über 15 h waren es
+25 Overruns.
+
+**Die Änderung.** `Evidence` liest `/dev/kmsg` Satz für Satz (die Sperre gilt dort je Satz) und
+bringt die Sätze in die Form von `dmesg`; die Auswahl der Zeilen bleibt gleich. Wo `/dev/kmsg`
+fehlt, bleibt `dmesg`. Gelesen wird mit `syscall.Open`/`syscall.Read`, nicht mit `os.OpenFile`:
+sonst übernimmt Go den Nicht-blockieren-Modus in seinen Netpoller, und das Lesen wartet am Ende
+auf den nächsten Satz, statt aufzuhören.
+
+| Datei | Inhalt |
+|---|---|
+| `internal/lib/wifi/evidence.go` | `/dev/kmsg` zuerst, `kmsgLine` |
+| `internal/lib/wifi/kmsg_linux.go` | der Leser |
+| `internal/lib/wifi/kmsg_other.go` | anderswo: kein `/dev/kmsg`, Rückfall auf `dmesg` |
+| `internal/lib/wifi/kmsg_test.go` | Form der Sätze, Ablehnung kaputter Sätze, Namen bleiben geschwärzt |
+| `internal/lib/wifi/kmsg_dot_test.go` | nur auf dem Gerät: echtes `/dev/kmsg`, ganz, schnell, ohne Warten |
+
+**Geprüft:** Tests am PC und am Gerät bestanden · `go vet` (linux/arm, `dot`) sauber · am Gerät
+10× gelesen, ~15.680 Zeilen in 0,19–0,25 s, **0 Overruns** · zweimal gebaut, **bitgleich** ·
+`echod` getauscht, 0 `ERROR`. **Noch offen:** ein echter Eingriff des Wächters ohne Overrun (die
+nächste taube Phase).
+
+**Nicht verändert:** `diag/bundle.go` ruft für das Diagnose-Bündel weiter `dmesg` — selten und nur
+auf Wunsch des Nutzers.
+
+**Rückweg:** Patch nicht anwenden; am Gerät `/data/rueckweg/echod.vor-kanal4` (`kanal3`).
+
+**Für das Ursprungsprojekt:** Der Aufruf steckt dort unverändert (`evidence.go`). Gemessen ist die
+Wirkung nur an unserem einen Dot 2; dass andere Geräte mit demselben Kernel genauso betroffen
+sind, ist **[ANNAHME]**. Den Patch weiterzugeben ist eine Veröffentlichung → Markus.

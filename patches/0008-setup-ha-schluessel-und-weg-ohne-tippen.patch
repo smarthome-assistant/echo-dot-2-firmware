@@ -1,0 +1,260 @@
+diff --git a/echod/internal/feature/setup/keyshow.go b/echod/internal/feature/setup/keyshow.go
+new file mode 100644
+index 00000000..602b43ab
+--- /dev/null
++++ b/echod/internal/feature/setup/keyshow.go
+@@ -0,0 +1,95 @@
++package setup
++
++import (
++	"encoding/base64"
++	"fmt"
++	"html"
++	"log/slog"
++	"net/http"
++
++	"rsc.io/qr"
++
++	"github.com/HuskerMinion/techo5/echod/internal/feature/firstrun"
++)
++
++// The Home Assistant key, shown on the settings page for somebody whose Home Assistant asks for it.
++//
++// First run has always shown it on a press of "Type the key" (firstrun_page.go); the settings page did
++// not, so a device set up some other way had its key on no page at all, and the one person we know of
++// who needed it read it off the device over SSH. It is shown here the way first run shows it, with two
++// limits more, because the settings page stays open longer and the key outlasts any session:
++//
++//   - only on a post with the page's own token, never in the page as it is built, so it is not in a
++//     page left open, in a browser's history or in anything that fetches /setup;
++//   - only while no Home Assistant is connected. A connected one already has the key; to move the
++//     device to another one, adding it without the key (the card above) is the way, and it changes
++//     the key as it does.
++//
++// The page is plain HTTP on the home network, so the key crosses it unencrypted, as it does when
++// first run shows it and as a new key does when a Home Assistant adds the device. The card says so.
++const keyPath = "/setup/key"
++
++func init() { routes[keyPath] = (*Feature).showKey }
++
++// keyButton is the card's way to the key, written only while no Home Assistant is connected.
++func keyButton(w http.ResponseWriter, token string) {
++	fmt.Fprintf(w, `<form method="post" action="%s"><input type="hidden" name="token" value="%s">
++	 <p class="note">Or type the key yourself: Home Assistant asks for it when it is added by address.
++	  It crosses your network unencrypted, as this page does.</p>
++	 <p><button type="submit" class="quiet">Show the key to type instead</button></p></form>`,
++		keyPath, html.EscapeString(token))
++}
++
++func (f *Feature) showKey(w http.ResponseWriter, r *http.Request) {
++	w.Header().Set("Cache-Control", "no-store")
++	token, in := f.session(r)
++	if !in {
++		notLetIn(w)
++		return
++	}
++	if r.Method != http.MethodPost {
++		http.Error(w, "post to see the key", http.StatusMethodNotAllowed)
++		return
++	}
++	r.Body = http.MaxBytesReader(w, r.Body, maxBody)
++	if err := r.ParseForm(); err != nil {
++		http.Error(w, "that form was too big or malformed", http.StatusBadRequest)
++		return
++	}
++	if !sameToken(r.PostFormValue("token"), token) {
++		slog.Warn("setup page: a request for the key arrived without the page's own token")
++		http.Error(w, "that form did not come from this page", http.StatusForbidden)
++		return
++	}
++	if statusHome() {
++		http.Error(w, "a Home Assistant is connected and already has the key; to move the device to another one, let it be added without the key", http.StatusConflict)
++		return
++	}
++	key := firstrun.Key()
++	if key == "" {
++		http.Error(w, "this device has no key now: it is open to be added, with nothing to type", http.StatusConflict)
++		return
++	}
++	slog.Info("setup page: the Home Assistant key was shown") // that it was, never what it is
++	w.Header().Set("Content-Type", "text/html; charset=utf-8")
++	head(w)
++	fmt.Fprintf(w, `<div class="wrap"><h1>%s</h1><p class="sub">The Home Assistant key</p>
++	 <fieldset><legend>The key</legend><p>In Home Assistant, add <strong>ESPHome</strong> with this
++	  device's address, port <strong>6053</strong>, and this key:</p>
++	 <p><code id="frkey" style="overflow-wrap:anywhere;word-break:break-all">%s</code></p>
++	 <p><button type="button" class="quiet" onclick="frCopy(this)">Copy the key</button></p>
++	 <script>
++	 // The page is plain HTTP, where a browser may refuse the clipboard: then the key is selected to copy.
++	 function frCopy(b){const k=document.getElementById('frkey');
++	  const pick=()=>{const r=document.createRange();r.selectNodeContents(k);const s=getSelection();s.removeAllRanges();s.addRange(r);b.textContent='Selected: copy it'};
++	  if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(k.textContent).then(()=>{b.textContent='Copied'},pick)}else{pick()}}
++	 </script>`, html.EscapeString(deviceName()), html.EscapeString(key))
++	if c, err := qr.Encode(key, qr.M); err == nil {
++		c.Scale = 6
++		fmt.Fprintf(w, `<p><img alt="The key as a QR code" width="%d" height="%d" src="data:image/png;base64,%s"></p>
++		 <p class="note">A phone's camera reads the key from it, to paste into Home Assistant.</p>`,
++			(c.Size+8)*6, (c.Size+8)*6, base64.StdEncoding.EncodeToString(c.PNG()))
++	}
++	fmt.Fprint(w, `<p class="note">Once Home Assistant has the device, it is not shown here any more.</p></fieldset>
++	 <p><a href="/setup?tab=network#adopt">Back to the settings</a></p></div>`)
++}
+diff --git a/echod/internal/feature/setup/keyshow_test.go b/echod/internal/feature/setup/keyshow_test.go
+new file mode 100644
+index 00000000..c6aa55d5
+--- /dev/null
++++ b/echod/internal/feature/setup/keyshow_test.go
+@@ -0,0 +1,93 @@
++package setup
++
++import (
++	"net/http"
++	"net/url"
++	"strings"
++	"testing"
++
++	"github.com/HuskerMinion/techo5/echod/internal/feature/firstrun"
++)
++
++const testKey = "a2V5IGZvciB0aGUga2V5IHNob3cgdGVzdHMgb25seSE="
++
++// keyIn is a browser let in, with a made-up key and Home Assistant connected or not as asked.
++func keyIn(t *testing.T, connected bool) (*Feature, *http.Cookie) {
++	t.Helper()
++	f, c := in(t)
++	k, h := firstrun.Key, statusHome
++	t.Cleanup(func() { firstrun.Key, statusHome = k, h })
++	firstrun.Key = func() string { return testKey }
++	statusHome = func() bool { return connected }
++	return f, c
++}
++
++func TestKeyShownOnlyWhenAskedAndNotConnected(t *testing.T) {
++	f, c := keyIn(t, false)
++	w := postTo(f, keyPath, c, url.Values{"token": {c.Value}})
++	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), testKey) {
++		t.Fatalf("asked, not connected: %d, key shown %v", w.Code, strings.Contains(w.Body.String(), testKey))
++	}
++	if !strings.Contains(w.Body.String(), "The key as a QR code") {
++		t.Error("no QR code beside the key")
++	}
++	if w.Header().Get("Cache-Control") != "no-store" {
++		t.Errorf("Cache-Control %q, want no-store", w.Header().Get("Cache-Control"))
++	}
++}
++
++func TestKeyRefused(t *testing.T) {
++	cases := []struct {
++		name      string
++		connected bool
++		do        func(f *Feature, c *http.Cookie) (int, string)
++		want      int
++	}{
++		{"not let in", false, func(f *Feature, c *http.Cookie) (int, string) {
++			w := postTo(f, keyPath, nil, url.Values{"token": {c.Value}})
++			return w.Code, w.Body.String()
++		}, 0},
++		{"a GET", false, func(f *Feature, c *http.Cookie) (int, string) {
++			w := get(f, keyPath, c)
++			return w.Code, w.Body.String()
++		}, http.StatusMethodNotAllowed},
++		{"without the page's token", false, func(f *Feature, c *http.Cookie) (int, string) {
++			w := postTo(f, keyPath, c, url.Values{"token": {"not-the-token"}})
++			return w.Code, w.Body.String()
++		}, http.StatusForbidden},
++		{"Home Assistant connected", true, func(f *Feature, c *http.Cookie) (int, string) {
++			w := postTo(f, keyPath, c, url.Values{"token": {c.Value}})
++			return w.Code, w.Body.String()
++		}, http.StatusConflict},
++	}
++	for _, tc := range cases {
++		t.Run(tc.name, func(t *testing.T) {
++			f, c := keyIn(t, tc.connected)
++			code, body := tc.do(f, c)
++			if strings.Contains(body, testKey) {
++				t.Fatalf("the key was shown: %d", code)
++			}
++			if tc.want != 0 && code != tc.want {
++				t.Errorf("status %d, want %d", code, tc.want)
++			}
++		})
++	}
++}
++
++// The settings page as it is built never carries the key, connected or not; the button to ask for it
++// is there only while no Home Assistant is connected.
++func TestSettingsPageNeverCarriesTheKey(t *testing.T) {
++	for _, connected := range []bool{false, true} {
++		f, c := keyIn(t, connected)
++		body := get(f, "/setup?tab=network", c).Body.String()
++		if strings.Contains(body, testKey) {
++			t.Fatalf("connected=%v: the settings page carries the key", connected)
++		}
++		if has := strings.Contains(body, `action="`+keyPath+`"`); has == connected {
++			t.Errorf("connected=%v: the key button there is %v", connected, has)
++		}
++		if !strings.Contains(body, "Home Assistant asks for an encryption key?") {
++			t.Errorf("connected=%v: the way with nothing to type is not offered first", connected)
++		}
++	}
++}
+diff --git a/echod/internal/feature/setup/page.go b/echod/internal/feature/setup/page.go
+index 4ff45c4f..52c4ce91 100644
+--- a/echod/internal/feature/setup/page.go
++++ b/echod/internal/feature/setup/page.go
+@@ -836,7 +836,8 @@ func thisPageSection(w http.ResponseWriter) {
+ 	sectionOpen(w, "thispage", "This page")
+ 	fmt.Fprint(w, `<p class="note" style="margin:0">It opens only after a press on the device, and closes itself when it
+ 	  is left alone. It is on your own network, without encryption. It never touches SSH keys or the
+-	  software the device runs, and never shows the Home Assistant key. It can let a Home Assistant add
++	  software the device runs. It shows the Home Assistant key only when asked, and only while no Home
++	  Assistant is connected (Network), as first run does. It can let a Home Assistant add
+ 	  the device for 15 minutes (Network), which sets a new key. It can record takes of a word from the
+ 	  microphones (Voice) only while Record takes of a word is switched on, and only after a
+ 	  press on the device for each recording; the takes stay in memory, and come to you over this page.
+@@ -1125,13 +1126,19 @@ func homeAssistantSection(w http.ResponseWriter, token string) {
+ 	}
+ 	fmt.Fprint(w, `<form method="post" action="/setup/save">`)
+ 	hidden(w, token, "adopt")
+-	fmt.Fprint(w, `<p style="margin:0">To add this device to your own Home Assistant when it came from
+-	 somebody else's, or left one: for 15 minutes the device has no key, and the Home Assistant that adds
+-	 it sets one.</p>
++	// The way to add the device without its key, and the one to take when Home Assistant asks for an
++	// encryption key: people type the key instead because nothing here says this is the alternative.
++	fmt.Fprint(w, `<p style="margin:0"><strong>Home Assistant asks for an encryption key?</strong> You do
++	 not need to type one. Use this instead: for 15 minutes the device has no key, and the Home Assistant
++	 that adds it sets one. The same goes for a device that came from somebody else's Home Assistant, or
++	 left one.</p>
+ 	 <p class="bad"><strong>A Home Assistant that has this device now loses it.</strong></p>
+ 	 <p><label><input type="checkbox" name="understood" value="yes">
+ 	  I know a Home Assistant that has this device now loses it</label></p>
+ 	 <p><button type="submit" class="danger">Let a Home Assistant add this device</button></p></form>`)
++	if !statusHome() {
++		keyButton(w, token) // keyshow.go: only while no Home Assistant is connected
++	}
+ 	sectionClose(w)
+ }
+ 
+@@ -1144,7 +1151,7 @@ func adoptSummary(until time.Time, connected bool) []string {
+ 	case connected:
+ 		return []string{"Connected"}
+ 	}
+-	return []string{"Not connected"}
++	return []string{"Not connected — can be added without typing a key"}
+ }
+ 
+ // ringWaitSection is whether the ring walks after a start while Home Assistant has not connected, for
+diff --git a/echod/internal/feature/setup/tabs.go b/echod/internal/feature/setup/tabs.go
+index 5f783f9c..66019576 100644
+--- a/echod/internal/feature/setup/tabs.go
++++ b/echod/internal/feature/setup/tabs.go
+@@ -244,6 +244,9 @@ var tabFor = map[string]string{
+ 
+ 	"wifi": "network", "forget": "network", "address": "network", "adopt": "network", "haaccess": "network", "timeserver": "network",
+ 	"tailscale": "network", "netbird": "network", "wallclock": "network",
++	// Two cards of this firmware's own: being found on the network (discovery.go) and the switch to
++	// Alexa (toalexa_dot.go). Without them here a save came back to Status.
++	"discovery": "network", "toalexa": "system",
+ 
+ 	"now": "status", "switchedon": "status", "diagnostics": "status",
+ 

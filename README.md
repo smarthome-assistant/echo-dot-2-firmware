@@ -19,6 +19,18 @@ Das Ziel ist ein **Sprach-Satellit für Home Assistant** auf vorhandener Hardwar
 | `0005` | **Der WLAN-Wächter reagiert schneller** | zwei Messreihen à ~9 h |
 | `0006` | Umleitung auf diesen Kanal (Adresse und Signaturschlüssel) | — |
 | `0007` | **Jeder Abruf der Update-Prüfung bekommt seine eigene Zeitgrenze** | acht Durchgänge am Gerät |
+| `0008` | Home Assistant: der Weg ohne Tippen zuerst, der Schlüssel nur auf Klick | Tests am Gerät |
+| `0009` | **Der WLAN-Wächter liest das Kernel-Protokoll, ohne die Mikrofone zu stören** | 10 von 10 gegen 0 von 10 am Gerät |
+
+> **Berichtigt am 21.11.2026:** `0003` war hier bis zum 21.11.2026 nicht die Fassung, aus der das ausgelieferte Programm gebaut war — die Berichtigung steckte nur in der Arbeitskopie. Seit `v1.0.72_kanal4` ergibt ein frischer Klon mit `0001`–`0009` **bitgleich** das veröffentlichte Programm.
+
+### `0009`, ein Fehler, den wir uns selbst eingebrockt hatten
+
+Vor jedem Eingriff zeichnet der WLAN-Wächter einen Beleg auf und rief dafür `dmesg`. Auf dem 3.18-Kernel des Dot liest `dmesg` den ganzen Ringpuffer (1 MB) **mit gesperrten Interrupts**. Der Leser der Mikrofone kommt so lange nicht dran, der Puffer im FPGA läuft über: **rund 16 ms Ton weg, bei jedem Aufruf** (am Gerät 10 von 10; mit `wpa_cli status` als Gegenprobe 0 von 10). Seit `0005` greift der Wächter öfter ein — über 15 Stunden waren es 25 Aussetzer.
+
+Jetzt liest er `/dev/kmsg` Satz für Satz; die Sperre gilt dort nur je Satz. Am Gerät 10 Läufe, **0 Aussetzer**. Wo `/dev/kmsg` fehlt, bleibt `dmesg`.
+
+**Noch nicht beobachtet:** ein echter Eingriff des Wächters mit dem neuen Bau. Dass andere Geräte mit demselben Kernel genauso betroffen sind, ist eine Annahme, nicht gemessen.
 
 ### Und `0007`, gefunden beim ersten Betrieb dieses Kanals
 

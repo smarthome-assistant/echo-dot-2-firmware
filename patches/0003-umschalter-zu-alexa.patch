@@ -1,9 +1,9 @@
 diff --git a/echod/internal/feature/setup/toalexa_dot.go b/echod/internal/feature/setup/toalexa_dot.go
 new file mode 100644
-index 00000000..e140d939
+index 00000000..c677214f
 --- /dev/null
 +++ b/echod/internal/feature/setup/toalexa_dot.go
-@@ -0,0 +1,104 @@
+@@ -0,0 +1,119 @@
 +//go:build dot
 +
 +package setup
@@ -29,6 +29,16 @@ index 00000000..e140d939
 +// there. It is the volume-up key held while the power is connected, which the unlock (amonet)
 +// mapped to the recovery partition. That is why the card says so twice and why it will not switch
 +// until the box confirming it has been tried is ticked.
++//
++// Tried on a Dot on 19 Nov 2026 (ablauf-protokoll.md, S22), and the detail that matters: the key
++// works, but it has to be held for several seconds. Two attempts that let go early landed in Fire
++// OS instead. The control run proves the key is what did it — with "FASTBOOT_PLEASE" written to
++// misc, holding volume-up still started this firmware, while the same boot without the key went to
++// fastboot.
++//
++// And do not tell anyone to watch for a white ring: both systems start with the same blue one.
++// This firmware paints the ring green within ~1.7 s of its boot script running (etc/techo5/
++// boot.sh), which is the only quick sign that tells them apart.
 +const (
 +	miscPartition = "/dev/mmcblk0p8"
 +	// miscMessageLen is the bootloader message at the start of misc: one 32-byte block. The A/B
@@ -48,12 +58,17 @@ index 00000000..e140d939
 +	  with your account and the microphone in their cloud, and Home Assistant cannot reach it.</p>
 +	 <p class="warn"><b>Coming back is a key, not a button.</b> Nothing of ours runs in Fire OS, so there
 +	  is nothing there to click. To return: unplug the device, hold the <b>volume-up</b> key, plug it back
-+	  in, and let go when the ring turns white. That starts this firmware again, and it stays until you
-+	  switch away once more.</p>
++	  in, and <b>keep holding for about ten seconds</b>. That starts this firmware again, and it stays
++	  until you switch away once more.</p>
++	 <p class="note"><b>Watch the ring, and know what to look for.</b> Both systems start with the same
++	  blue ring, so blue tells you nothing. This firmware turns the ring <b>green</b> within a couple of
++	  seconds of starting — faint at first, then bright once it is ready. Green means you are back.
++	  Measured on a Dot on 19 Nov 2026: holding volume-up started this firmware even when the boot
++	  message asked for something else, so the key does override it — but only when held long enough.</p>
 +	 <p class="warn"><b>Try that key first, while this firmware is still running.</b> If it does not work
 +	  on your device, a failed attempt costs nothing now — but it would cost the device later.</p>
 +	 <p><label><input type="checkbox" name="tried" value="yes" style="width:auto"> I have held volume-up
-+	  while plugging in, and this firmware started</label></p>
++	  while plugging in for about ten seconds, and the ring turned green</label></p>
 +	 <p><label><input type="checkbox" name="understood" value="yes" style="width:auto"> I understand that
 +	  Fire OS may install an Amazon update, which can lock the device again</label></p>
 +	 <p><button type="submit">Restart into Alexa</button></p></form>`)

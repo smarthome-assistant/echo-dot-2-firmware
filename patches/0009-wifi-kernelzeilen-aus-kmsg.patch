@@ -1,0 +1,202 @@
+diff --git a/echod/internal/lib/wifi/evidence.go b/echod/internal/lib/wifi/evidence.go
+index e42bab96..9910dba0 100644
+--- a/echod/internal/lib/wifi/evidence.go
++++ b/echod/internal/lib/wifi/evidence.go
+@@ -2,8 +2,10 @@ package wifi
+ 
+ import (
+ 	"context"
++	"fmt"
+ 	"os/exec"
+ 	"regexp"
++	"strconv"
+ 	"strings"
+ 	"time"
+ 
+@@ -22,12 +24,34 @@ func Evidence(ctx context.Context) []string {
+ 	}
+ 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+ 	defer cancel()
+-	if k, err := exec.CommandContext(ctx, "dmesg").Output(); err == nil {
++	// /dev/kmsg first: dmesg costs the microphones a stretch of audio on the Dots (kmsg_linux.go).
++	if k, ok := readKmsg(ctx); ok {
++		out = append(out, kernelEvidence(k, 8)...)
++	} else if k, err := exec.CommandContext(ctx, "dmesg").Output(); err == nil {
+ 		out = append(out, kernelEvidence(string(k), 8)...)
+ 	}
+ 	return out
+ }
+ 
++// kmsgLine turns one /dev/kmsg record ("prio,seq,usec,flags;text", then dictionary lines that begin
++// with a space) into dmesg's "[  sec.usec] text". A record it cannot read is left out.
++func kmsgLine(rec string) (string, bool) {
++	head, rest, ok := strings.Cut(rec, ";")
++	if !ok {
++		return "", false
++	}
++	text, _, _ := strings.Cut(rest, "\n")
++	f := strings.Split(head, ",")
++	if len(f) < 3 {
++		return "", false
++	}
++	us, err := strconv.ParseUint(f[2], 10, 64)
++	if err != nil {
++		return "", false
++	}
++	return fmt.Sprintf("[%5d.%06d] %s", us/1e6, us%1e6, text), true
++}
++
+ // statusKeys are the lines of wpa_cli status worth keeping; everything else names something.
+ var statusKeys = []string{"wpa_state", "freq", "key_mgmt", "pairwise_cipher", "group_cipher"}
+ 
+diff --git a/echod/internal/lib/wifi/kmsg_dot_test.go b/echod/internal/lib/wifi/kmsg_dot_test.go
+new file mode 100644
+index 00000000..6f97ea62
+--- /dev/null
++++ b/echod/internal/lib/wifi/kmsg_dot_test.go
+@@ -0,0 +1,36 @@
++//go:build dot
++
++package wifi
++
++import (
++	"context"
++	"strings"
++	"testing"
++	"time"
++)
++
++// On a Dot the ring is read from /dev/kmsg, whole, quickly, and in dmesg's shape, and without a wait
++// for a record that has not come yet (the reason for the plain syscalls).
++func TestReadKmsgOnTheDevice(t *testing.T) {
++	start := time.Now()
++	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
++	defer cancel()
++	k, ok := readKmsg(ctx)
++	took := time.Since(start)
++	if !ok {
++		t.Skip("no /dev/kmsg here")
++	}
++	lines := strings.Split(strings.TrimSpace(k), "\n")
++	if len(lines) < 100 {
++		t.Fatalf("only %d lines from the kernel's ring", len(lines))
++	}
++	for _, l := range lines {
++		if !strings.HasPrefix(l, "[") {
++			t.Fatalf("not dmesg-shaped: %q", l)
++		}
++	}
++	if took > 3*time.Second || ctx.Err() != nil {
++		t.Errorf("took %v: a read waited instead of ending", took)
++	}
++	t.Logf("%d lines in %v", len(lines), took)
++}
+diff --git a/echod/internal/lib/wifi/kmsg_linux.go b/echod/internal/lib/wifi/kmsg_linux.go
+new file mode 100644
+index 00000000..91f1383e
+--- /dev/null
++++ b/echod/internal/lib/wifi/kmsg_linux.go
+@@ -0,0 +1,49 @@
++//go:build linux
++
++package wifi
++
++import (
++	"context"
++	"strings"
++	"syscall"
++)
++
++// kmsgMost bounds the records read in one go: a full 1 MB ring holds some 15,000, and a link line
++// that is older than that is of no use as evidence anyway.
++const kmsgMost = 40000
++
++// readKmsg reads the kernel's ring from /dev/kmsg, one record per read, and gives it back in dmesg's
++// shape. Not dmesg itself: dmesg reads the whole ring through syslog(2), which on the Echo Dot's 3.18
++// kernel holds logbuf_lock with interrupts off for the whole copy (kernel/printk/printk.c,
++// syslog_print_all). With the ring full that is long enough to hold up the microphones' SPI reader,
++// and the FPGA's buffer overruns: one dropped stretch of audio for every dmesg, measured 10 of 10.
++// /dev/kmsg takes that lock for one record at a time (devkmsg_read).
++//
++// The plain syscalls are on purpose: a file opened with O_NONBLOCK through os.OpenFile is handed to
++// Go's poller, and a read then waits for the next record instead of saying there is none.
++func readKmsg(ctx context.Context) (string, bool) {
++	fd, err := syscall.Open("/dev/kmsg", syscall.O_RDONLY|syscall.O_NONBLOCK|syscall.O_CLOEXEC, 0)
++	if err != nil {
++		return "", false
++	}
++	defer syscall.Close(fd)
++	var b strings.Builder
++	buf := make([]byte, 8192)
++	for i := 0; i < kmsgMost && ctx.Err() == nil; i++ {
++		n, err := syscall.Read(fd, buf)
++		if err == syscall.EPIPE {
++			continue // the record we were at was overwritten; the kernel moves us on
++		}
++		if err == syscall.EINTR {
++			continue
++		}
++		if err != nil || n <= 0 {
++			break // EAGAIN: nothing more
++		}
++		if line, ok := kmsgLine(string(buf[:n])); ok {
++			b.WriteString(line)
++			b.WriteByte('\n')
++		}
++	}
++	return b.String(), true
++}
+diff --git a/echod/internal/lib/wifi/kmsg_other.go b/echod/internal/lib/wifi/kmsg_other.go
+new file mode 100644
+index 00000000..bb8de378
+--- /dev/null
++++ b/echod/internal/lib/wifi/kmsg_other.go
+@@ -0,0 +1,8 @@
++//go:build !linux
++
++package wifi
++
++import "context"
++
++// readKmsg has no /dev/kmsg to read here; Evidence falls back to dmesg.
++func readKmsg(context.Context) (string, bool) { return "", false }
+diff --git a/echod/internal/lib/wifi/kmsg_test.go b/echod/internal/lib/wifi/kmsg_test.go
+new file mode 100644
+index 00000000..a0909709
+--- /dev/null
++++ b/echod/internal/lib/wifi/kmsg_test.go
+@@ -0,0 +1,34 @@
++package wifi
++
++import (
++	"strings"
++	"testing"
++)
++
++// A /dev/kmsg record comes out in dmesg's shape, so kernelEvidence keeps the same lines from either.
++func TestKmsgLineIsDmesgShaped(t *testing.T) {
++	rec := "6,4711,24091003540,-;[wlan]kalIndicateStatusAndComplete:(AIS INFO) wlan0 netif_carrier_on [ssid:Our Home]\n SUBSYSTEM=net\n DEVICE=n3\n"
++	got, ok := kmsgLine(rec)
++	if !ok || got != "[24091.003540] [wlan]kalIndicateStatusAndComplete:(AIS INFO) wlan0 netif_carrier_on [ssid:Our Home]" {
++		t.Fatalf("got %q, %v", got, ok)
++	}
++	if strings.Contains(got, "SUBSYSTEM") {
++		t.Errorf("a dictionary line was kept: %q", got)
++	}
++	lines := kernelEvidence(got+"\n", 8)
++	if len(lines) != 1 || strings.Contains(lines[0], "Our Home") || !strings.Contains(lines[0], "24091.003540") {
++		t.Errorf("kernelEvidence on a kmsg line: %q", lines)
++	}
++	if got, _ := kmsgLine("12,1,7,c;x"); got != "[    0.000007] x" {
++		t.Errorf("small time: %q", got)
++	}
++}
++
++// A record that is not one is left out rather than guessed at.
++func TestKmsgLineRefusesWhatIsNotARecord(t *testing.T) {
++	for _, rec := range []string{"", "no semicolon here", "6,1;short head", "6,1,soon,-;text"} {
++		if got, ok := kmsgLine(rec); ok {
++			t.Errorf("%q read as %q", rec, got)
++		}
++	}
++}
